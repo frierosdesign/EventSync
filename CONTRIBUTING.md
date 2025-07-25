@@ -37,13 +37,13 @@
    ```bash
    # Ve a GitHub y haz fork del repositorio
    # Luego clona tu fork
-   git clone https://github.com/tu-usuario/eventsync.git
+   git clone https://github.com/frierosdesign/EventSync.git
    cd eventsync
    ```
 
 2. **Configurar el upstream**
    ```bash
-   git remote add upstream https://github.com/original-owner/eventsync.git
+   git remote add upstream https://github.com/frierosdesign/EventSync.git
    ```
 
 3. **Instalar dependencias**
@@ -311,9 +311,9 @@ Todas las contribuciones son valiosas y serán reconocidas:
 
 Si tienes preguntas sobre cómo contribuir:
 
-- 📧 Email: tu-email@ejemplo.com
+- 📧 Email: anabel@frierosdesign.com
 - 💬 Discord: [Servidor de la comunidad](https://discord.gg/eventsync)
-- 🐛 Issues: [GitHub Issues](https://github.com/tu-usuario/eventsync/issues)
+- 🐛 Issues: [GitHub Issues](https://github.com/frierosdesign/EventSync/issues)
 
 ---
 

@@ -84,8 +84,8 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 - 📖 [Documentación Completa](./README.md)
 - 🤝 [Guía de Contribución](./CONTRIBUTING.md)
-- 🐛 [Reportar Bugs](https://github.com/tu-usuario/eventsync/issues)
-- 💡 [Solicitar Features](https://github.com/tu-usuario/eventsync/issues)
+- 🐛 [Reportar Bugs](https://github.com/frierosdesign/EventSync/issues)
+- 💡 [Solicitar Features](https://github.com/frierosdesign/EventSync/issues)
 
 ---
 

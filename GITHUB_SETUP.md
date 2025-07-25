@@ -166,7 +166,7 @@ Puedes añadir:
 
 ```bash
 # Clonar el repositorio en una nueva ubicación para probar
-git clone https://github.com/TU_USUARIO/eventsync.git eventsync-test
+git clone https://github.com/frierosdesign/EventSync.git eventsync-test
 cd eventsync-test
 npm install
 npm run dev
@@ -191,10 +191,10 @@ npm run dev
 ## 🔗 Enlaces Útiles
 
 ### Tu Repositorio
-- 📖 **Repositorio**: https://github.com/TU_USUARIO/eventsync
-- 🐛 **Issues**: https://github.com/TU_USUARIO/eventsync/issues
-- 📋 **Pull Requests**: https://github.com/TU_USUARIO/eventsync/pulls
-- 📊 **Insights**: https://github.com/TU_USUARIO/eventsync/pulse
+- 📖 **Repositorio**: https://github.com/frierosdesign/EventSync
+- 🐛 **Issues**: https://github.com/frierosdesign/EventSync/issues
+- 📋 **Pull Requests**: https://github.com/frierosdesign/EventSync/pulls
+- 📊 **Insights**: https://github.com/frierosdesign/EventSync/pulse
 
 ### Documentación
 - 📖 **README**: [README.md](./README.md)
@@ -214,4 +214,4 @@ Tu proyecto EventSync está ahora:
 
 ---
 
-**¿Necesitas ayuda?** Revisa la [documentación completa](./README.md) o [crea un issue](https://github.com/TU_USUARIO/eventsync/issues) si tienes problemas. 
+**¿Necesitas ayuda?** Revisa la [documentación completa](./README.md) o [crea un issue](https://github.com/frierosdesign/EventSync/issues) si tienes problemas. 

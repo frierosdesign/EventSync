@@ -58,7 +58,7 @@
 
 ### 1. Clonar el repositorio
 ```bash
-git clone https://github.com/tu-usuario/eventsync.git
+git clone https://github.com/frierosdesign/EventSync.git
 cd eventsync
 ```
 
@@ -227,7 +227,7 @@ Este proyecto está bajo la Licencia MIT - ver el archivo [LICENSE](LICENSE) par
 
 ## 👥 Autores
 
-- **Tu Nombre** - *Desarrollo inicial* - [TuUsuario](https://github.com/TuUsuario)
+- **Anabel Frieros** - *Desarrollo inicial* - [frierosdesign](https://github.com/frierosdesign)
 
 ## 🙏 Agradecimientos
 
@@ -241,8 +241,8 @@ Este proyecto está bajo la Licencia MIT - ver el archivo [LICENSE](LICENSE) par
 
 Si tienes alguna pregunta o problema:
 
-- 📧 Email: tu-email@ejemplo.com
-- 🐛 Issues: [GitHub Issues](https://github.com/tu-usuario/eventsync/issues)
+- 📧 Email: anabel@frierosdesign.com
+- 🐛 Issues: [GitHub Issues](https://github.com/frierosdesign/EventSync/issues)
 - 💬 Discord: [Servidor de la comunidad](https://discord.gg/eventsync)
 
 ---
