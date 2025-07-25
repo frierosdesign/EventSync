@@ -204,7 +204,12 @@ router.post('/extract', validateInstagramUrl, async (req: Request, res: Response
       date: extractionResult.data.dateTime?.startDate || new Date().toISOString(),
       time: extractionResult.data.dateTime?.startTime,
       location: extractionResult.data.location ? 
-        `${extractionResult.data.location.name}${extractionResult.data.location.city ? `, ${extractionResult.data.location.city}` : ''}` : 
+        [
+          extractionResult.data.location.name,
+          extractionResult.data.location.address,
+          extractionResult.data.location.city,
+          extractionResult.data.location.country
+        ].filter(Boolean).join(', ') : 
         undefined,
       instagramUrl: url,
       imageUrl: extractionResult.data.media?.images?.[0]?.url,

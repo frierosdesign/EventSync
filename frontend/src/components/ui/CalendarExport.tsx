@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, ExternalLink, Settings, Check, AlertTriangle, Clock } from 'lucide-react';
+import { Calendar, Settings, Copy, CheckCircle, AlertCircle, ExternalLink, Clock, AlertTriangle } from 'lucide-react';
 
 // Tipos temporales hasta resolver importaciones de módulos compartidos
 interface CalendarExportOptions {
@@ -52,21 +52,45 @@ interface ExtractedData extends Event {
   [key: string]: any; // Allow any additional properties
 }
 
-// Funciones temporales
-const generateGoogleCalendarUrlFromEvent = (event: Event, options: CalendarExportOptions = {}): string => {
-  return generateGoogleCalendarUrl(event, options);
+// Función para decodificar texto URI codificado
+const decodeText = (text: string): string => {
+  if (!text) return '';
+  
+  // Verificar si el texto está codificado
+  if (text.includes('%') || text.includes('+')) {
+    try {
+      return decodeURIComponent(text.replace(/\+/g, '%20'));
+    } catch (error) {
+      console.warn('Error decoding text:', error);
+      return text;
+    }
+  }
+  return text;
 };
 
-const generateGoogleCalendarUrlFromExtractedData = (data: ExtractedData, options: CalendarExportOptions = {}): string => {
-  return generateGoogleCalendarUrl(data, options);
+// Función mejorada de codificación URI
+const encodeForUrl = (text: string): string => {
+  return encodeURIComponent(text)
+    .replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+    .replace(/%20/g, '+');
+};
+
+// Función para limpiar el título
+const sanitizeTitle = (title: string): string => {
+  return title
+    .trim()
+    .replace(/\n+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .substring(0, 100); // Google Calendar tiene límite de caracteres
 };
 
 const generateGoogleCalendarUrl = (event: Event | ExtractedData, options: CalendarExportOptions = {}): string => {
   const baseUrl = 'https://calendar.google.com/calendar/render?action=TEMPLATE';
   const params = new URLSearchParams();
 
-  // Título
-  params.append('text', encodeURIComponent(event.title || ''));
+  // Título - decodificar y enviar sin codificar (URLSearchParams lo maneja automáticamente)
+  const decodedTitle = decodeText(event.title || '');
+  params.append('text', sanitizeTitle(decodedTitle));
 
   // Fechas
   if (event.dateTime?.startDate) {
@@ -80,28 +104,47 @@ const generateGoogleCalendarUrl = (event: Event | ExtractedData, options: Calend
   }
 
   // Descripción
-  let description = event.description || '';
+  let description = decodeText(event.description || '');
   if (options.includeInstagramUrl && 'originalUrl' in event && event.originalUrl) {
     description += `\n\nVer en Instagram: ${event.originalUrl}`;
   }
   if (description) {
-    params.append('details', encodeURIComponent(description));
+    params.append('details', description);
   }
 
   // Ubicación
   if (event.location) {
-    const locationParts = [
-      event.location.name,
-      event.location.address,
-      event.location.city,
-      event.location.country
-    ].filter(Boolean);
-    if (locationParts.length > 0) {
-      params.append('location', encodeURIComponent(locationParts.join(', ')));
+    let locationString: string;
+    
+    if (typeof event.location === 'string') {
+      locationString = decodeText(event.location);
+    } else if (typeof event.location === 'object') {
+      const locationParts = [
+        decodeText(event.location.name || ''),
+        decodeText(event.location.address || ''),
+        decodeText(event.location.city || ''),
+        decodeText(event.location.country || '')
+      ].filter(Boolean);
+      locationString = locationParts.join(', ');
+    } else {
+      locationString = '';
+    }
+    
+    if (locationString) {
+      params.append('location', locationString);
     }
   }
 
   return `${baseUrl}&${params.toString()}`;
+};
+
+// Funciones de conveniencia
+const generateGoogleCalendarUrlFromEvent = (event: Event, options: CalendarExportOptions = {}): string => {
+  return generateGoogleCalendarUrl(event, options);
+};
+
+const generateGoogleCalendarUrlFromExtractedData = (data: ExtractedData, options: CalendarExportOptions = {}): string => {
+  return generateGoogleCalendarUrl(data, options);
 };
 
 const formatDateForGoogleCalendar = (dateString: string, timeString?: string, isAllDay?: boolean): string => {
@@ -329,7 +372,7 @@ export const CalendarExport: React.FC<CalendarExportProps> = ({
           onClick={handleExport}
           className={`${getButtonClasses()} bg-green-600 hover:bg-green-700`}
         >
-          <Check className={`${getIconSize()} mr-2`} />
+          <CheckCircle className={`${getIconSize()} mr-2`} />
           ¡Exportado!
         </button>
       );

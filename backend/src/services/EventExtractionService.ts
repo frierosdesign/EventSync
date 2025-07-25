@@ -579,7 +579,34 @@ export class EventExtractionService {
    */
   private generateEventData(template: any, context: ExtractionContext, isPartial: boolean): ExtractedData {
     const now = new Date();
-    const futureDate = new Date(now.getTime() + Math.random() * 90 * 24 * 60 * 60 * 1000); // Próximos 90 días
+    
+    // Generar fecha más realista basada en el tipo de evento
+    let futureDate: Date;
+    const daysFromNow = Math.floor(Math.random() * 90) + 7; // Entre 7 y 97 días
+    
+    // Ajustar fechas según el tipo de evento
+    if (template.type === EventType.CONCERT || template.type === EventType.PARTY) {
+      // Conciertos y fiestas suelen ser en fines de semana
+      futureDate = new Date(now.getTime() + daysFromNow * 24 * 60 * 60 * 1000);
+      const dayOfWeek = futureDate.getDay();
+      if (dayOfWeek === 0) { // Domingo
+        futureDate.setDate(futureDate.getDate() + 5); // Mover a viernes
+      } else if (dayOfWeek === 6) { // Sábado
+        futureDate.setDate(futureDate.getDate() - 1); // Mover a viernes
+      }
+    } else if (template.type === EventType.SPORTS) {
+      // Eventos deportivos suelen ser en fines de semana
+      futureDate = new Date(now.getTime() + daysFromNow * 24 * 60 * 60 * 1000);
+      const dayOfWeek = futureDate.getDay();
+      if (dayOfWeek === 0) { // Domingo
+        futureDate.setDate(futureDate.getDate() + 5); // Mover a viernes
+      } else if (dayOfWeek === 6) { // Sábado
+        futureDate.setDate(futureDate.getDate() - 1); // Mover a viernes
+      }
+    } else {
+      // Otros eventos pueden ser cualquier día
+      futureDate = new Date(now.getTime() + daysFromNow * 24 * 60 * 60 * 1000);
+    }
     
     // Generar fecha en formato español
     const months = [
@@ -596,9 +623,9 @@ export class EventExtractionService {
     const venue = template.venues[Math.floor(Math.random() * template.venues.length)];
     const price = template.prices[Math.floor(Math.random() * template.prices.length)];
 
-    // Si es parcial, omitir algunos campos aleatoriamente
+    // Si es parcial, omitir algunos campos aleatoriamente, pero SIEMPRE incluir ubicación
     const includeTime = !isPartial || Math.random() > 0.5;
-    const includeLocation = !isPartial || Math.random() > 0.3;
+    const includeLocation = true; // Siempre incluir ubicación
     const includePrice = !isPartial || Math.random() > 0.4;
     const includeHashtags = !isPartial || Math.random() > 0.2;
 

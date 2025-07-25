@@ -98,6 +98,22 @@ interface EventPreviewProps {
   className?: string;
 }
 
+// Función para decodificar títulos URI codificados
+function decodeTitle(title: string): string {
+  // Verificar si el título está codificado
+  if (title.includes('%') || title.includes('+')) {
+    try {
+      // Intentar decodificar
+      return decodeURIComponent(title.replace(/\+/g, '%20'));
+    } catch (error) {
+      // Si falla la decodificación, devolver el título original
+      console.warn('Error decoding title:', error);
+      return title;
+    }
+  }
+  return title;
+}
+
 // Función utilitaria para convertir Event a EventData
 function eventToEventData(event: Event): EventData {
   // Manejar diferentes formatos de fecha
@@ -118,17 +134,27 @@ function eventToEventData(event: Event): EventData {
     time = undefined;
   }
 
-  return {
-    id: event.id,
-    title: event.title,
-    description: event.description || '',
-    date: date,
-    time: time,
-    location: event.location ? [
+  // Manejar diferentes formatos de ubicación
+  let location: string | undefined;
+  if (typeof event.location === 'string') {
+    location = event.location;
+  } else if (event.location && typeof event.location === 'object') {
+    const locationParts = [
       event.location.name,
       event.location.address,
-      event.location.city
-    ].filter(Boolean).join(', ') : undefined,
+      event.location.city,
+      event.location.country
+    ].filter(Boolean);
+    location = locationParts.join(', ');
+  }
+
+  return {
+    id: event.id,
+    title: decodeTitle(event.title),
+    description: decodeTitle(event.description || ''),
+    date: date,
+    time: time,
+    location: location,
     instagramUrl: event.urls?.instagram || event.extractedData?.originalUrl || '',
     confidence: event.extractedData?.metadata?.confidence
   };
@@ -136,16 +162,26 @@ function eventToEventData(event: Event): EventData {
 
 // Función utilitaria para convertir ExtractedData a EventData
 function extractedDataToEventData(extractedData: ExtractedData): EventData {
-  return {
-    title: extractedData.title,
-    description: extractedData.description || '',
-    date: extractedData.dateTime.startDate,
-    time: extractedData.dateTime.startTime,
-    location: extractedData.location ? [
+  // Manejar diferentes formatos de ubicación
+  let location: string | undefined;
+  if (typeof extractedData.location === 'string') {
+    location = extractedData.location;
+  } else if (extractedData.location && typeof extractedData.location === 'object') {
+    const locationParts = [
       extractedData.location.name,
       extractedData.location.address,
-      extractedData.location.city
-    ].filter(Boolean).join(', ') : undefined,
+      extractedData.location.city,
+      extractedData.location.country
+    ].filter(Boolean);
+    location = locationParts.join(', ');
+  }
+
+  return {
+    title: decodeTitle(extractedData.title),
+    description: decodeTitle(extractedData.description || ''),
+    date: extractedData.dateTime.startDate,
+    time: extractedData.dateTime.startTime,
+    location: location,
     instagramUrl: extractedData.originalUrl,
     confidence: extractedData.metadata.confidence
   };
@@ -264,7 +300,7 @@ export const EventPreview: React.FC<EventPreviewProps> = ({
             />
           ) : (
             <h2 className="text-xl font-bold text-gray-900 leading-tight">
-              {currentEvent.title}
+              {decodeTitle(currentEvent.title)}
             </h2>
           )}
         </div>
@@ -281,7 +317,7 @@ export const EventPreview: React.FC<EventPreviewProps> = ({
             />
           ) : (
             <p className="text-gray-700 leading-relaxed">
-              {currentEvent.description}
+              {decodeTitle(currentEvent.description)}
             </p>
           )}
         </div>
@@ -325,24 +361,26 @@ export const EventPreview: React.FC<EventPreviewProps> = ({
           )}
 
           {/* Ubicación */}
-          {(currentEvent.location || isEditing) && (
-            <div className="flex items-center space-x-3">
-              <MapPin className="h-5 w-5 text-blue-600 flex-shrink-0" />
-              {isEditing ? (
-                <input
-                  type="text"
-                  value={editedEvent.location || ''}
-                  onChange={(e) => setEditedEvent({ ...editedEvent, location: e.target.value })}
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Ubicación del evento"
-                />
-              ) : (
-                <span className="text-gray-700 font-medium">
-                  {currentEvent.location}
-                </span>
-              )}
-            </div>
-          )}
+          <div className="flex items-center space-x-3">
+            <MapPin className="h-5 w-5 text-blue-600 flex-shrink-0" />
+            {isEditing ? (
+              <input
+                type="text"
+                value={editedEvent.location || ''}
+                onChange={(e) => setEditedEvent({ ...editedEvent, location: e.target.value })}
+                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Ubicación del evento"
+              />
+            ) : currentEvent.location ? (
+              <span className="text-gray-700 font-medium">
+                {decodeTitle(currentEvent.location)}
+              </span>
+            ) : (
+              <span className="text-gray-500 italic">
+                Ubicación no especificada
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Acciones */}
@@ -410,7 +448,7 @@ export const EventPreview: React.FC<EventPreviewProps> = ({
                       allDay: !currentEvent.time
                     },
                     location: currentEvent.location ? {
-                      name: currentEvent.location
+                      name: decodeTitle(currentEvent.location)
                     } : undefined,
                     originalUrl: currentEvent.instagramUrl,
                     rawContent: '',
@@ -418,9 +456,9 @@ export const EventPreview: React.FC<EventPreviewProps> = ({
                       extractedAt: new Date().toISOString(),
                       processingTime: 0,
                       instagramPostId: '',
-                                             contentType: InstagramContentType.POST,
-                       confidence: currentEvent.confidence || 0.8,
-                       confidenceLevel: ExtractionConfidence.HIGH,
+                      contentType: InstagramContentType.POST,
+                      confidence: currentEvent.confidence || 0.8,
+                      confidenceLevel: ExtractionConfidence.HIGH,
                       extractorVersion: '1.0.0',
                       errors: [],
                       warnings: []
