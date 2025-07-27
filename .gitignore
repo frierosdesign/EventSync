@@ -123,3 +123,4 @@ coverage/
 *.tgz
 *.tar.gz backend/.env.backup
 backend/ig-cookies.json
+backend/instagram-cookies.json
