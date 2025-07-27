@@ -98,6 +98,30 @@ export const LoadingButton: React.FC<{ message?: string }> = ({
   />
 );
 
+export const ExtractionSpinner: React.FC<{ 
+  message?: string;
+  step?: 'scraping' | 'processing' | 'analyzing';
+}> = ({ 
+  message,
+  step = 'scraping'
+}) => {
+  const stepMessages = {
+    scraping: "🕷️ Extrayendo contenido de Instagram...",
+    processing: "🤖 Procesando con IA...",
+    analyzing: "📊 Analizando datos del evento..."
+  };
+
+  const displayMessage = message || stepMessages[step];
+
+  return (
+    <LoadingSpinner 
+      size="lg" 
+      message={displayMessage} 
+      variant="primary"
+    />
+  );
+};
+
 export const LoadingCard: React.FC<{ message?: string }> = ({ 
   message = "Cargando datos..." 
 }) => (

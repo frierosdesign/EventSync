@@ -42,8 +42,21 @@ export class EventService {
 
   constructor(database: Database.Database) {
     this.db = database;
-    this.extractionService = EventExtractionService.getInstance();
-    this.mockService = new MockDataService();
+    
+    // Initialize services with error handling
+    try {
+      this.extractionService = EventExtractionService.getInstance();
+    } catch (error) {
+      apiLogger.warn('⚠️ EventExtractionService initialization failed, will use fallback', { error });
+      this.extractionService = null as any;
+    }
+    
+    try {
+      this.mockService = new MockDataService();
+    } catch (error) {
+      apiLogger.warn('⚠️ MockDataService initialization failed', { error });
+      this.mockService = null as any;
+    }
   }
 
   /**
@@ -51,7 +64,9 @@ export class EventService {
    */
   public async getAllEvents(): Promise<{ events: Event[]; count: number }> {
     try {
-      const rows = await this.db.all(`
+      apiLogger.info('🔍 Starting database query...');
+      
+      const rows = this.db.prepare(`
         SELECT 
           id,
           title,
@@ -66,32 +81,49 @@ export class EventService {
           raw_content as rawContent
         FROM events 
         ORDER BY created_at DESC
-      `);
+      `).all();
+      
+      apiLogger.info(`📊 Raw database rows: ${rows.length}`);
       
       // Map database rows to Event objects
-      const events: Event[] = rows.map((row: any) => ({
-        id: row.id.toString(),
-        title: row.title,
-        description: row.description || '',
-        date: row.date,
-        time: row.time,
-        location: row.location,
-        instagramUrl: row.instagramUrl,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-        imageUrl: null, // TODO: Extract from extracted_data if available
-        confidence: null // TODO: Extract from extracted_data if available
-      }));
+      const events: Event[] = rows.map((row: any, index: number) => {
+        try {
+          const event: Event = {
+            id: row.id,
+            title: row.title,
+            description: row.description || '',
+            date: row.date,
+            time: row.time,
+            location: row.location,
+            instagramUrl: row.instagramUrl,
+            rawContent: row.rawContent || '',
+            extractedData: row.extractedData || '',
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt
+          };
+          return event;
+        } catch (mapError) {
+          apiLogger.error(`❌ Error mapping row ${index}`, { row, mapError });
+          throw mapError;
+        }
+      });
       
-      apiLogger.info(`📊 Retrieved ${events.length} events from database`);
+      apiLogger.info(`📊 Successfully mapped ${events.length} events from database`);
       
       return {
         events,
         count: events.length
       };
     } catch (error) {
-      apiLogger.error('❌ Error fetching events', { error });
-      throw new Error('Failed to fetch events');
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      apiLogger.error('❌ Error fetching events', { 
+        errorMessage, 
+        errorStack,
+        errorType: error?.constructor?.name,
+        fullError: error 
+      });
+      throw new Error(`Failed to fetch events: ${errorMessage}`);
     }
   }
 

@@ -3,7 +3,7 @@ import { Calendar, MapPin, Clock, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { CalendarExport } from '../components/ui/CalendarExport';
-import { InstagramContentType, ExtractionConfidence } from 'eventsync-shared';
+// Removed unused imports
 
 interface Event {
   id: string;
@@ -155,9 +155,9 @@ export const EventsPage: React.FC = () => {
                       extractedAt: new Date().toISOString(),
                       processingTime: 0,
                       instagramPostId: '',
-                      contentType: InstagramContentType.POST,
+                      contentType: 'post',
                       confidence: 0.8,
-                      confidenceLevel: ExtractionConfidence.HIGH,
+                      confidenceLevel: 'high',
                       extractorVersion: '1.0.0',
                       errors: [],
                       warnings: []

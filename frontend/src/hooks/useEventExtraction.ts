@@ -8,6 +8,7 @@ import { Event, ExtractedData } from '../types';
 
 export interface ExtractionState {
   isLoading: boolean;
+  loadingStep?: 'scraping' | 'processing' | 'analyzing';
   error: string | null;
   errorType: ApiErrorType | null;
   event: Event | null;
@@ -67,6 +68,7 @@ export const useEventExtraction = (): UseEventExtractionReturn => {
     
     setState({
       isLoading: true,
+      loadingStep: 'scraping',
       error: null,
       errorType: null,
       event: null,
@@ -77,7 +79,14 @@ export const useEventExtraction = (): UseEventExtractionReturn => {
     try {
       console.log('[useEventExtraction] Starting extraction for:', url);
       
+      // Simular progreso de los pasos
+      const progressTimer = setTimeout(() => {
+        setState(prev => ({ ...prev, loadingStep: 'processing' }));
+      }, 5000);
+      
       const response = await apiClient.extractEvent({ url });
+      clearTimeout(progressTimer);
+      
       const processingTime = Date.now() - startTime;
 
       if (response.success && response.data) {
@@ -102,9 +111,20 @@ export const useEventExtraction = (): UseEventExtractionReturn => {
       console.error('[useEventExtraction] Extraction failed:', error);
 
       if (error instanceof ApiError) {
+        let errorMessage = error.message;
+        
+        // Mensajes más específicos para diferentes tipos de error
+        if (error.type === ApiErrorType.TIMEOUT_ERROR) {
+          errorMessage = 'La extracción está tomando más tiempo del esperado. Esto puede deberse a que Instagram está procesando la solicitud. Por favor, intenta de nuevo en unos momentos.';
+        } else if (error.type === ApiErrorType.NETWORK_ERROR) {
+          errorMessage = 'Error de conexión. Verifica tu conexión a internet e intenta de nuevo.';
+        } else if (error.type === ApiErrorType.SERVER_ERROR) {
+          errorMessage = 'Error en el servidor. El sistema está procesando tu solicitud, pero ha ocurrido un problema. Por favor, intenta de nuevo.';
+        }
+        
         setState({
           isLoading: false,
-          error: error.message,
+          error: errorMessage,
           errorType: error.type,
           event: null,
           extractedData: null,

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { URLInputForm } from '../components/ui/URLInputForm';
 import { EventPreview } from '../components/ui/EventPreview';
-import { LoadingSpinner } from '../components/ui/LoadingSpinner';
+import { LoadingSpinner, ExtractionSpinner } from '../components/ui/LoadingSpinner';
 import { ErrorMessage } from '../components/ui/ErrorMessage';
 import { StatusCard } from '../components/ui/StatusCard';
 import { useApp } from '../contexts/AppContext';
@@ -297,12 +297,14 @@ export const MainInterface: React.FC = () => {
               <div className="bg-white rounded-lg shadow-lg p-6">
                 <div className="flex items-center justify-center">
                   <div className="text-center">
-                    <LoadingSpinner size="lg" />
-                    <p className="mt-4 text-gray-600">
-                      Analizando contenido de Instagram...
+                    <ExtractionSpinner 
+                      step="scraping"
+                    />
+                    <p className="text-sm text-gray-500 mt-4">
+                      La extracción puede tomar entre 30-60 segundos
                     </p>
-                    <p className="text-sm text-gray-500 mt-2">
-                      Esto puede tomar unos momentos
+                    <p className="text-xs text-gray-400 mt-1">
+                      Dependiendo de la complejidad del contenido
                     </p>
                   </div>
                 </div>

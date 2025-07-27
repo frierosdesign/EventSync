@@ -64,7 +64,7 @@ export class ApiError extends Error {
 
 const DEFAULT_CONFIG: ApiClientConfig = {
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001/api',
-  timeout: 10000, // 10 segundos
+  timeout: 30000, // 30 segundos por defecto
   retry: {
     retries: 3,
     retryDelay: (retryCount: number) => Math.min(1000 * Math.pow(2, retryCount), 10000), // Exponential backoff
@@ -264,7 +264,7 @@ export class ApiClient {
 
   public async extractEvent(request: ExtractEventRequest): Promise<ExtractEventResponse> {
     return this.post<ExtractEventResponse>('/events/extract', request, {
-      customTimeout: 30000 // Extracción puede tomar más tiempo
+      customTimeout: 120000 // 2 minutos para extracciones complejas
     });
   }
 

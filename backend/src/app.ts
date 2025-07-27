@@ -9,6 +9,7 @@ import { notFound } from './middleware/notFound';
 import { requestLogger } from './middleware/logger';
 import eventRoutes from './routes/events';
 import { initializeDatabase, getDatabase } from './config/database';
+import { OpenAIVisionService } from './services/OpenAIVisionService';
 
 // Load environment variables
 dotenv.config();
@@ -21,12 +22,25 @@ app.use(helmet());
 app.use(cors({
   origin: [
     process.env.FRONTEND_URL || 'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:3002',
     'http://localhost:3003',
+    'http://localhost:3004',
+    'http://localhost:3005',
+    'http://localhost:3006',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3001',
+    'http://127.0.0.1:3002',
     'http://127.0.0.1:3003',
+    'http://127.0.0.1:3004',
+    'http://127.0.0.1:3005',
+    'http://127.0.0.1:3006',
     'http://localhost:5173',
     'http://127.0.0.1:5173'
   ],
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 // Logging middleware
 if (process.env.NODE_ENV === 'development') {
@@ -47,6 +61,117 @@ app.get('/health', (_req, res) => {
   });
 });
 
+// Debug endpoint (temporary)
+app.get('/debug', (_req, res) => {
+  res.status(200).json({
+    apiKeyLength: process.env.AI_MODEL_API_KEY ? process.env.AI_MODEL_API_KEY.length : 0,
+    apiKeyStartsWith: process.env.AI_MODEL_API_KEY ? process.env.AI_MODEL_API_KEY.substring(0, 10) + '...' : 'undefined',
+    isDemoKey: process.env.AI_MODEL_API_KEY === 'sk-demo-key-for-testing',
+    nodeEnv: process.env.NODE_ENV,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Test OpenAI endpoint (temporary)
+app.get('/test-openai', async (_req, res) => {
+  try {
+    // Test simple OpenAI call
+    const openai = new (await import('openai')).default({
+      apiKey: process.env.AI_MODEL_API_KEY,
+    });
+    
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [{ role: "user", content: "Say 'Hello World'" }],
+      max_tokens: 10,
+    });
+    
+    res.status(200).json({
+      success: true,
+      response: response.choices[0]?.message?.content,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// Test OpenAI Vision endpoint (temporary)
+app.get('/test-openai-vision', async (_req, res) => {
+  try {
+    const openai = new (await import('openai')).default({
+      apiKey: process.env.AI_MODEL_API_KEY,
+    });
+    
+    // Test with a simple image URL
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "What do you see in this image? Just say 'I can see an image' if you can see it."
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: "https://picsum.photos/200/200"
+              }
+            }
+          ]
+        }
+      ],
+      max_tokens: 50,
+    });
+    
+    res.status(200).json({
+      success: true,
+      response: response.choices[0]?.message?.content,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// Debug endpoint para probar OpenAI Vision
+app.get('/debug-vision', async (_req, res) => {
+  try {
+    const visionService = OpenAIVisionService.getInstance();
+    
+    // Crear una imagen de prueba
+    const testImageUrl = 'https://picsum.photos/800/600?random=999';
+    const response = await fetch(testImageUrl);
+    const imageBuffer = Buffer.from(await response.arrayBuffer());
+    
+    // Probar Vision AI directamente
+    const result = await visionService.extractEventFromUrl('https://www.instagram.com/p/debug-test/');
+    
+    res.json({
+      success: true,
+      result,
+      imageSize: imageBuffer.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // API Routes
 app.use('/api/events', eventRoutes);
 
@@ -59,10 +184,10 @@ const seedSampleData = async () => {
   try {
     const db = getDatabase();
     
-    // Check if we already have events - use async version
-    const existing = await db.get('SELECT COUNT(*) as count FROM events');
+    // Check if we already have events
+    const existing = db.prepare('SELECT COUNT(*) as count FROM events').get();
     
-    if (existing && existing.count === 0) {
+    if (existing && (existing as any).count === 0) {
       console.log('🌱 Seeding sample events...');
       
       const sampleEvents = [
@@ -109,10 +234,10 @@ const seedSampleData = async () => {
       ];
       
       for (const event of sampleEvents) {
-        await db.run(`
+        db.prepare(`
           INSERT INTO events (title, description, date, time, location, instagram_url, raw_content, extracted_data)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
+        `).run([
           event.title,
           event.description,
           event.date,
@@ -126,7 +251,7 @@ const seedSampleData = async () => {
       
       console.log(`✅ Seeded ${sampleEvents.length} sample events`);
     } else {
-      console.log(`📊 Database already has ${existing?.count || 0} events`);
+      console.log(`📊 Database already has ${(existing as any)?.count || 0} events`);
     }
   } catch (error) {
     console.error('Error seeding sample data:', error);

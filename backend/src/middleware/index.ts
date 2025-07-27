@@ -7,7 +7,6 @@ export {
   validateEventsQuery,
   isValidUrl,
   isInstagramUrl,
-  isValidInstagramContentUrl,
-  detectInstagramContentType
+  isValidInstagramContentUrl
 } from './validation';
 export { requestLogger, errorLogger } from './logger'; 

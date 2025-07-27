@@ -77,13 +77,13 @@ router.get('/', async (req: Request, res: Response) => {
  * GET /api/events/stats
  * Obtener estadísticas del servicio
  */
-router.get('/stats', async (req: Request, res: Response) => {
+router.get('/stats', async (_req: Request, res: Response) => {
   try {
     apiLogger.info('📊 Fetching service statistics');
     
     const stats = getEventService().getServiceStats();
     
-    res.json({
+    return res.json({
       success: true,
       data: stats,
       timestamp: new Date().toISOString()
@@ -92,7 +92,7 @@ router.get('/stats', async (req: Request, res: Response) => {
   } catch (error) {
     apiLogger.error('❌ Error fetching stats', { error });
     
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to fetch service statistics'
     });
@@ -131,7 +131,7 @@ router.get('/:id', validateEventId, async (req: Request, res: Response) => {
       });
     }
     
-    res.json({
+    return res.json({
       success: true,
       data: event,
       timestamp: new Date().toISOString()
@@ -140,7 +140,7 @@ router.get('/:id', validateEventId, async (req: Request, res: Response) => {
   } catch (error) {
     apiLogger.error('❌ Error fetching event by ID', { error, eventId: req.params.id });
     
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to fetch event'
     });
@@ -201,19 +201,12 @@ router.post('/extract', validateInstagramUrl, async (req: Request, res: Response
       id: `extracted_${Date.now()}`,
       title: extractionResult.data.title,
       description: extractionResult.data.description,
-      date: extractionResult.data.dateTime?.startDate || new Date().toISOString(),
-      time: extractionResult.data.dateTime?.startTime,
-      location: extractionResult.data.location ? 
-        [
-          extractionResult.data.location.name,
-          extractionResult.data.location.address,
-          extractionResult.data.location.city,
-          extractionResult.data.location.country
-        ].filter(Boolean).join(', ') : 
-        undefined,
+      date: extractionResult.data.date || new Date().toISOString(),
+      time: extractionResult.data.time,
+      location: extractionResult.data.location,
       instagramUrl: url,
-      imageUrl: extractionResult.data.media?.images?.[0]?.url,
-      confidence: extractionResult.data.metadata?.confidence,
+      imageUrl: extractionResult.data.imageUrl,
+      confidence: extractionResult.data.confidence,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -225,7 +218,7 @@ router.post('/extract', validateInstagramUrl, async (req: Request, res: Response
       warnings: extractionResult.warnings?.length || 0
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       data: {
         event: eventData,
@@ -246,7 +239,7 @@ router.post('/extract', validateInstagramUrl, async (req: Request, res: Response
       processingTime: totalTime
     });
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Internal server error during event extraction',
       processingTime: totalTime
@@ -286,7 +279,7 @@ router.delete('/:id', validateEventId, async (req: Request, res: Response) => {
       });
     }
     
-    res.json({
+    return res.json({
       success: true,
       message: 'Event deleted successfully',
       eventId,
@@ -296,7 +289,7 @@ router.delete('/:id', validateEventId, async (req: Request, res: Response) => {
   } catch (error) {
     apiLogger.error('❌ Error deleting event', { error, eventId: req.params.id });
     
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Failed to delete event'
     });

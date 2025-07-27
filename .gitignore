@@ -121,4 +121,5 @@ coverage/
 
 # Misc
 *.tgz
-*.tar.gz 
+*.tar.gz backend/.env.backup
+backend/ig-cookies.json
