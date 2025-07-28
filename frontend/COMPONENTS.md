@@ -172,9 +172,15 @@ interface EventData {
 - ✅ Modo vista y edición
 - ✅ Mostrar imagen de Instagram
 - ✅ Indicador de confianza de extracción
-- ✅ Enlace directo al post de Instagram
+- ✅ Enlace directo al post de Instagram (botón prominente)
+- ✅ Enlace en header cuando hay imagen
 - ✅ Edición inline de todos los campos
 - ✅ Acciones personalizables
+
+**Enlaces de Instagram:**
+El componente incluye dos formas de acceder al post original de Instagram:
+1. **Icono de enlace externo**: En la sección de acciones, al lado del botón de calendario
+2. **Enlace en header**: Cuando hay imagen, un icono flotante en la esquina superior derecha
 
 ## 🔧 Hooks Personalizados
 

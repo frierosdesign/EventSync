@@ -284,28 +284,85 @@ export class OpenAIVisionService {
         throw new Error('Invalid Instagram URL format');
       }
 
-      // Descargar y procesar imagen
-      const imageBuffer = await this.downloadImage(url);
-      if (!imageBuffer) {
-        throw new Error('Failed to download image from Instagram');
-      }
-
-      // Intentar extracción con Vision AI
-      let result = await this.extractWithVisionAI(imageBuffer, url, contentType);
+      // Extraer datos del post de Instagram (incluyendo la URL de la imagen real)
+      let postData = null;
+      let realImageUrl: string | undefined = undefined;
+      let postText = '';
+      let hashtags: string[] = [];
+      let mentions: string[] = [];
+      let username = '';
       
-      apiLogger.info(`🔍 Vision AI result: success=${result.success}, method=${result.extractionMethod}, error=${result.error || 'none'}`);
-
-      // Si Vision AI falla, intentar con OCR
-      if (!result.success && result.error?.includes('vision')) {
-        apiLogger.scraping(`🔄 Vision AI failed, trying OCR fallback`);
-        result = await this.extractWithOCR(imageBuffer, url, contentType);
-        apiLogger.info(`🔍 OCR result: success=${result.success}, method=${result.extractionMethod}, error=${result.error || 'none'}`);
+      try {
+        postData = await this.instagramScraper.extractPostData(url);
+        if (postData) {
+          if (postData.imageUrl) {
+            realImageUrl = postData.imageUrl;
+            apiLogger.scraping(`📸 Found real Instagram image URL: ${realImageUrl}`);
+          }
+          if (postData.caption) {
+            postText = postData.caption;
+            apiLogger.scraping(`📝 Found Instagram post text: ${postText.substring(0, 100)}...`);
+          }
+          if (postData.hashtags) {
+            hashtags = postData.hashtags;
+            apiLogger.scraping(`🏷️ Found hashtags: ${hashtags.join(', ')}`);
+          }
+          if (postData.mentions) {
+            mentions = postData.mentions;
+            apiLogger.scraping(`👥 Found mentions: ${mentions.join(', ')}`);
+          }
+          if (postData.username) {
+            username = postData.username;
+            apiLogger.scraping(`👤 Found username: ${username}`);
+          }
+        }
+      } catch (error) {
+        apiLogger.scraping(`⚠️ Could not extract post data: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
 
-      // Si ambos fallan, usar fallback básico
+      // Descargar y procesar imagen
+      let imageBuffer: Buffer | null = null;
+      try {
+        imageBuffer = await this.downloadImage(url);
+        if (imageBuffer) {
+          apiLogger.scraping(`✅ Image downloaded successfully`);
+        } else {
+          apiLogger.scraping(`⚠️ Failed to download image, will use text-based extraction`);
+        }
+      } catch (error) {
+        apiLogger.scraping(`⚠️ Image download failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+
+      // Si tenemos imagen, intentar extracción con Vision AI
+      let result: VisionExtractionResult;
+      
+      if (imageBuffer) {
+        // Intentar extracción con Vision AI
+        result = await this.extractWithVisionAI(imageBuffer, url, contentType, realImageUrl);
+        apiLogger.info(`🔍 Vision AI result: success=${result.success}, method=${result.extractionMethod}, error=${result.error || 'none'}`);
+
+        // Si Vision AI falla, intentar con OCR
+        if (!result.success && result.error?.includes('vision')) {
+          apiLogger.scraping(`🔄 Vision AI failed, trying OCR fallback`);
+          result = await this.extractWithOCR(imageBuffer, url, contentType, realImageUrl);
+          apiLogger.info(`🔍 OCR result: success=${result.success}, method=${result.extractionMethod}, error=${result.error || 'none'}`);
+        }
+      } else {
+        // No tenemos imagen, saltar directamente al fallback
+        result = {
+          success: false,
+          error: 'No image available',
+          confidence: 0,
+          processingTime: 0,
+          warnings: ['Image download failed'],
+          extractionMethod: 'vision'
+        };
+      }
+
+      // Si ambos fallan o no hay imagen, usar fallback mejorado con texto
       if (!result.success) {
-        apiLogger.scraping(`🔄 Both Vision AI and OCR failed, using basic fallback`);
-        result = await this.extractWithFallback(url, contentType);
+        apiLogger.scraping(`🔄 Using enhanced text-based fallback extraction...`);
+        result = await this.extractWithFallback(url, contentType, realImageUrl, postText);
         apiLogger.info(`🔍 Fallback result: success=${result.success}, method=${result.extractionMethod}, error=${result.error || 'none'}`);
       }
 
@@ -397,7 +454,7 @@ export class OpenAIVisionService {
   /**
    * Extrae información usando OpenAI Vision AI
    */
-  private async extractWithVisionAI(imageBuffer: Buffer, url: string, contentType: InstagramContentType): Promise<VisionExtractionResult> {
+  private async extractWithVisionAI(imageBuffer: Buffer, url: string, contentType: InstagramContentType, realImageUrl?: string): Promise<VisionExtractionResult> {
     try {
       // Check if OpenAI client is available
       if (!this.openai) {
@@ -470,7 +527,33 @@ export class OpenAIVisionService {
           fullPrompt += `👤 USUARIO: @${username}\n\n`;
         }
         
-        fullPrompt += `Analiza tanto la imagen como toda la información del post para extraer la información del evento. Si el texto del post contiene información específica sobre fecha, hora, ubicación o detalles del evento, úsala como fuente principal. Los hashtags y menciones pueden proporcionar contexto adicional sobre el tipo de evento.`;
+        fullPrompt += `IMPORTANTE: Analiza tanto la imagen como toda la información del post para extraer la información del evento. Si el texto del post contiene información específica sobre fecha, hora, ubicación o detalles del evento, úsala como fuente principal. Los hashtags y menciones pueden proporcionar contexto adicional sobre el tipo de evento.
+
+INSTRUCCIONES ESPECÍFICAS:
+1. Si el texto del post menciona una fecha específica (ej: "DIVENDRES 07/02", "7 de febrero"), úsala como fecha del evento
+2. Si el texto menciona una hora (ej: "22:00", "a las 10pm"), úsala como hora del evento
+3. Si el texto menciona un lugar específico (ej: "Salvadiscos", "Oblicuo"), úsala como ubicación PRINCIPAL
+4. Si el texto menciona artistas o nombres específicos, úsalos para crear un título descriptivo
+5. Los hashtags y menciones pueden indicar el tipo de evento (música, arte, etc.)
+
+PRIORIDAD DE UBICACIÓN:
+- PRIMERA PRIORIDAD: Lugares específicos de eventos musicales como "Salvadiscos", "Oblicuo", "Hi-Fi", "Golfo de Guinea", "Dublab"
+- SEGUNDA PRIORIDAD: Lugares genéricos como "Club", "Bar", "Pub", "Discoteca", "Sala"
+- ÚLTIMA PRIORIDAD: Lugares muy genéricos como "Asociación", "Centro", "Espacio"
+
+Si encuentras tanto un lugar específico (como "Salvadiscos") como un lugar genérico (como "asociación") en el mismo texto, SIEMPRE prioriza el lugar específico.
+
+Responde en formato JSON con la siguiente estructura:
+{
+  "title": "Título específico del evento basado en el texto e imagen",
+  "description": "Descripción detallada del evento",
+  "date": "YYYY-MM-DD",
+  "time": "HH:MM",
+  "location": "Ubicación específica (priorizar lugares específicos sobre genéricos)",
+  "eventType": "CONCERT|FESTIVAL|EXHIBITION|OTHER",
+  "category": "MUSIC|ART_CULTURE|FOOD_DRINK|OTHER",
+  "confidence": 0.9
+}`;
       }
       
       apiLogger.info('📤 Sending request to OpenAI Vision API...');
@@ -497,78 +580,93 @@ export class OpenAIVisionService {
             }
           ],
           max_tokens: 1500, // Aumentado para respuestas más detalladas
-          temperature: 0.1
+          temperature: 0.1, // Reducido para respuestas más consistentes
+          response_format: { type: "json_object" } // Forzar respuesta JSON
         });
-
-        return response.choices[0]?.message?.content || '';
+        
+        return response;
       });
 
-      apiLogger.info(`📥 OpenAI response received: ${result.substring(0, 200)}...`);
-      
-      // Log completo de la respuesta para debugging
-      apiLogger.info(`🔍 Full OpenAI response: ${result}`);
-      
-      // Verificar si la respuesta parece JSON
-      const isJsonLike = result.trim().startsWith('{') && result.trim().endsWith('}');
-      apiLogger.info(`🔍 Response looks like JSON: ${isJsonLike}`);
+      if (!result || !result.choices || result.choices.length === 0) {
+        throw new Error('No response from OpenAI Vision API');
+      }
 
-      // Parsear respuesta de OpenAI
-      const extractedData = this.parseOpenAIResponse(result, url, contentType);
-      
-      // Mejorar la confianza basada en la información extraída
-      let confidence = extractedData.metadata.confidence;
-      let confidenceBoost = 0;
-      
-      if (postText) {
-        confidenceBoost += 0.1; // Texto del post
-        extractedData.metadata.warnings.push('Post text used to enhance extraction');
+      const responseText = result.choices[0].message.content;
+      if (!responseText) {
+        throw new Error('Empty response from OpenAI Vision API');
       }
-      
-      if (hashtags.length > 0) {
-        confidenceBoost += 0.05; // Hashtags
-        extractedData.metadata.warnings.push(`Hashtags found: ${hashtags.length}`);
+
+      apiLogger.info(`📥 Received response from OpenAI Vision API: ${responseText.substring(0, 200)}...`);
+
+      // Parsear la respuesta JSON
+      let parsedData;
+      try {
+        parsedData = JSON.parse(responseText);
+      } catch (parseError) {
+        apiLogger.error(`❌ Failed to parse OpenAI response as JSON: ${parseError}`);
+        throw new Error('Invalid JSON response from OpenAI Vision API');
       }
-      
-      if (mentions.length > 0) {
-        confidenceBoost += 0.03; // Menciones
-        extractedData.metadata.warnings.push(`Mentions found: ${mentions.length}`);
-      }
-      
-      if (username) {
-        confidenceBoost += 0.02; // Username
-        extractedData.metadata.warnings.push(`Username found: @${username}`);
-      }
-      
-      confidence = Math.min(0.95, confidence + confidenceBoost);
-      
-      // Actualizar los datos extraídos con la información real del post
-      if (hashtags.length > 0) {
-        extractedData.social.hashtags = [...new Set([...extractedData.social.hashtags, ...hashtags])];
-      }
-      
-      if (mentions.length > 0) {
-        extractedData.social.mentions = [...new Set([...extractedData.social.mentions, ...mentions])];
-      }
-      
-      apiLogger.info('✅ OpenAI Vision extraction completed successfully');
-      
+
+      // Convertir a SharedExtractedData
+      const extractedData: SharedExtractedData = {
+        title: parsedData.title || 'Evento extraído',
+        description: parsedData.description || 'Descripción del evento',
+        dateTime: {
+          startDate: parsedData.date || new Date().toISOString().split('T')[0],
+          startTime: parsedData.time || '18:00',
+          timezone: 'Europe/Madrid',
+          allDay: false
+        },
+        location: {
+          name: parsedData.location || 'Ubicación no especificada',
+          city: 'Barcelona',
+          country: 'España'
+        },
+        type: parsedData.eventType || EventType.OTHER,
+        category: parsedData.category || EventCategory.OTHER,
+        tags: hashtags,
+        media: {
+          images: realImageUrl ? [{ url: realImageUrl, alt: 'Event image' }] : [],
+          videos: []
+        },
+        social: {
+          hashtags,
+          mentions
+        },
+        metadata: {
+          extractedAt: new Date().toISOString(),
+          processingTime: 0,
+          instagramPostId: this.extractContentId(url),
+          contentType,
+          confidence: parsedData.confidence || 0.8,
+          confidenceLevel: ExtractionConfidence.HIGH,
+          extractorVersion: '4.0.0-enhanced-vision',
+          errors: [],
+          warnings: []
+        },
+        rawContent: postText || 'Información extraída con OpenAI Vision',
+        originalUrl: url
+      };
+
       return {
         success: true,
         data: extractedData,
-        confidence,
-        processingTime: 0,
-        warnings: extractedData.metadata.warnings,
+        processingTime: Date.now() - (this.lastRequestTime || Date.now()),
+        confidence: parsedData.confidence || 0.8,
+        warnings: [],
         extractionMethod: 'vision'
       };
 
     } catch (error) {
-      apiLogger.error(`❌ OpenAI Vision API error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      apiLogger.error(`❌ OpenAI Vision API error: ${errorMessage}`);
+      
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Vision AI extraction failed',
+        error: errorMessage,
         confidence: 0,
         processingTime: 0,
-        warnings: ['Vision AI processing failed'],
+        warnings: [`OpenAI Vision API failed: ${errorMessage}`],
         extractionMethod: 'vision'
       };
     }
@@ -577,7 +675,7 @@ export class OpenAIVisionService {
   /**
    * Extrae información usando OCR como fallback
    */
-  private async extractWithOCR(imageBuffer: Buffer, url: string, _contentType: InstagramContentType): Promise<VisionExtractionResult> {
+  private async extractWithOCR(imageBuffer: Buffer, url: string, _contentType: InstagramContentType, realImageUrl?: string): Promise<VisionExtractionResult> {
     try {
       apiLogger.scraping(`📝 Processing with OCR...`);
       
@@ -631,7 +729,7 @@ export class OpenAIVisionService {
       apiLogger.scraping(`📝 OCR extracted text: ${extractedText.substring(0, 200)}...`);
 
       // Procesar el texto extraído para encontrar información de eventos
-      const eventData = this.parseEventDataFromText(extractedText, url);
+      const eventData = this.parseEventDataFromText(extractedText, url, realImageUrl);
       
       return {
         success: true,
@@ -658,38 +756,41 @@ export class OpenAIVisionService {
   /**
    * Extrae información usando fallback básico
    */
-  private async extractWithFallback(url: string, contentType: InstagramContentType): Promise<VisionExtractionResult> {
+  private async extractWithFallback(url: string, contentType: InstagramContentType, realImageUrl?: string, postText?: string): Promise<VisionExtractionResult> {
     try {
       apiLogger.scraping(`🔄 Using basic fallback extraction...`);
       
-      // Intentar extraer datos del post de Instagram para mejorar el fallback
-      let postData = null;
-      let postText = '';
-      try {
-        postData = await this.instagramScraper.extractPostData(url);
-        if (postData && postData.caption) {
-          postText = postData.caption;
-          apiLogger.scraping(`📝 Found Instagram post text for fallback: ${postText.substring(0, 100)}...`);
+      // Usar el texto del post pasado como parámetro, o extraerlo si no está disponible
+      let postTextForFallback = postText || '';
+      
+      if (!postTextForFallback) {
+        // Intentar extraer datos del post de Instagram para mejorar el fallback
+        let postData = null;
+        try {
+          postData = await this.instagramScraper.extractPostData(url);
+          if (postData && postData.caption) {
+            postTextForFallback = postData.caption;
+            apiLogger.scraping(`📝 Found Instagram post text for fallback: ${postTextForFallback.substring(0, 100)}...`);
+          }
+        } catch (error) {
+          apiLogger.scraping(`⚠️ Could not extract post text for fallback: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
-      } catch (error) {
-        apiLogger.scraping(`⚠️ Could not extract post text for fallback: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } else {
+        apiLogger.scraping(`📝 Using provided post text for fallback: ${postTextForFallback.substring(0, 100)}...`);
       }
       
       // Generar datos básicos basados en la URL y el texto del post si está disponible
-      const extractedData = this.generateBasicEventData(url, contentType, postText);
+      const extractedData = this.generateBasicEventData(url, contentType, postTextForFallback, realImageUrl);
       
       const warnings = ['Limited information available, using basic extraction'];
-      if (postText) {
+      if (postTextForFallback) {
         warnings.push('Post text analyzed in fallback mode');
-      }
-      if (postData && postData.hashtags && postData.hashtags.length > 0) {
-        warnings.push(`Hashtags found: ${postData.hashtags.length}`);
       }
       
       return {
         success: true,
         data: extractedData,
-        confidence: postText ? 0.4 : 0.3, // Mayor confianza si tenemos texto del post
+        confidence: postTextForFallback ? 0.4 : 0.3, // Mayor confianza si tenemos texto del post
         processingTime: 0,
         warnings,
         extractionMethod: 'fallback'
@@ -726,189 +827,9 @@ export class OpenAIVisionService {
   }
 
   /**
-   * Parsea respuesta de OpenAI
-   */
-  private parseOpenAIResponse(response: string, url: string, contentType: InstagramContentType): SharedExtractedData {
-    // Intentar parsear como JSON
-    let parsed: any = null;
-    let warnings: string[] = [];
-    
-    // Limpiar la respuesta de posibles caracteres extra
-    let cleanedResponse = response.trim();
-    
-    // Extraer JSON de bloques de código markdown si está presente
-    const jsonBlockMatch = cleanedResponse.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-    if (jsonBlockMatch) {
-      cleanedResponse = jsonBlockMatch[1];
-      apiLogger.info(`🔍 Extracted JSON from markdown block`);
-    }
-    
-    try {
-      parsed = JSON.parse(cleanedResponse);
-      apiLogger.info(`✅ Successfully parsed JSON response`);
-    } catch (err) {
-      warnings.push('Respuesta de OpenAI no es JSON válido, usando extracción heurística');
-      apiLogger.info(`❌ Failed to parse JSON: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      apiLogger.info(`🔍 Attempted to parse: ${cleanedResponse.substring(0, 200)}...`);
-    }
-
-    // Si es JSON válido y tiene campos de evento
-    if (parsed && typeof parsed === 'object' && (parsed.title || parsed.nombre || parsed.event_title)) {
-      apiLogger.info(`✅ Using structured JSON data`);
-      return {
-        title: parsed.title || parsed.nombre || parsed.event_title || 'Evento extraído',
-        description: parsed.description || parsed.descripcion || parsed.details || '',
-        dateTime: {
-          startDate: parsed.startDate || parsed.fecha || parsed.date || new Date().toISOString(),
-          startTime: parsed.startTime || parsed.hora || parsed.time || '18:00',
-          timezone: parsed.timezone || 'Europe/Madrid',
-          allDay: parsed.allDay || false
-        },
-        location: {
-          name: parsed.location?.name || parsed.venue || parsed.lugar || 'Ubicación no especificada',
-          city: parsed.location?.city || parsed.city || 'Barcelona',
-          country: parsed.location?.country || parsed.country || 'España'
-        },
-        type: parsed.type || EventType.OTHER,
-        category: parsed.category || EventCategory.OTHER,
-        tags: parsed.tags || parsed.hashtags || [],
-        media: {
-          images: parsed.media?.images || [{ url: `https://picsum.photos/800/600?random=${Math.floor(Math.random() * 1000)}`, alt: 'Event image' }],
-          videos: parsed.media?.videos || []
-        },
-        social: {
-          hashtags: parsed.social?.hashtags || parsed.hashtags || [],
-          mentions: parsed.social?.mentions || parsed.mentions || []
-        },
-        metadata: {
-          extractedAt: new Date().toISOString(),
-          processingTime: 0,
-          instagramPostId: this.extractContentId(url),
-          contentType,
-          confidence: parsed.confidence || 0.8,
-          confidenceLevel: parsed.confidenceLevel || ExtractionConfidence.HIGH,
-          extractorVersion: '3.0.0-openai-vision',
-          errors: [],
-          warnings: [...warnings, 'Información extraída usando OpenAI Vision']
-        },
-        rawContent: response,
-        originalUrl: url
-      };
-    }
-
-    apiLogger.info(`🔍 Using heuristic extraction for response: ${cleanedResponse.substring(0, 100)}...`);
-
-    // Extracción heurística usando regex si no es JSON válido
-    const titleMatch = cleanedResponse.match(/(?:título|title|evento|event|nombre):\s*([^\n\r]+)/i);
-    const descriptionMatch = cleanedResponse.match(/(?:descripción|description|detalles|details):\s*([^\n\r]+)/i);
-    const dateMatch = cleanedResponse.match(/(?:fecha|date):\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/i);
-    const timeMatch = cleanedResponse.match(/(?:hora|time):\s*(\d{1,2}:\d{2})/i);
-    const locationMatch = cleanedResponse.match(/(?:ubicación|location|lugar|venue):\s*([^\n\r]+)/i);
-    const cityMatch = cleanedResponse.match(/(?:ciudad|city):\s*([^\n\r]+)/i);
-    const hashtagMatches = cleanedResponse.match(/#\w+/g);
-
-    // Log de matches encontrados
-    apiLogger.info(`🔍 Heuristic matches - Title: ${titleMatch ? 'Yes' : 'No'}, Date: ${dateMatch ? 'Yes' : 'No'}, Time: ${timeMatch ? 'Yes' : 'No'}, Location: ${locationMatch ? 'Yes' : 'No'}`);
-
-    // Extraer fecha y hora más inteligentemente
-    let extractedDate = new Date();
-    let extractedTime = '18:00';
-    
-    if (dateMatch) {
-      try {
-        extractedDate = new Date(dateMatch[1]);
-        if (isNaN(extractedDate.getTime())) {
-          extractedDate = new Date();
-        }
-      } catch (e) {
-        extractedDate = new Date();
-      }
-    }
-    
-    if (timeMatch) {
-      extractedTime = timeMatch[1];
-    }
-
-    // Determinar tipo de evento basado en palabras clave
-    let eventType = EventType.OTHER;
-    let eventCategory = EventCategory.OTHER;
-    
-    const lowerResponse = cleanedResponse.toLowerCase();
-    if (lowerResponse.includes('concierto') || lowerResponse.includes('música') || lowerResponse.includes('music')) {
-      eventType = EventType.CONCERT;
-      eventCategory = EventCategory.MUSIC;
-    } else if (lowerResponse.includes('festival') || lowerResponse.includes('party')) {
-      eventType = EventType.FESTIVAL;
-      eventCategory = EventCategory.MUSIC;
-    } else if (lowerResponse.includes('exposición') || lowerResponse.includes('arte') || lowerResponse.includes('art')) {
-      eventType = EventType.EXHIBITION;
-      eventCategory = EventCategory.ART_CULTURE;
-    } else if (lowerResponse.includes('taller') || lowerResponse.includes('workshop')) {
-      eventType = EventType.WORKSHOP;
-      eventCategory = EventCategory.EDUCATION;
-    } else if (lowerResponse.includes('deporte') || lowerResponse.includes('sport')) {
-      eventType = EventType.SPORTS;
-      eventCategory = EventCategory.SPORTS_FITNESS;
-    } else if (lowerResponse.includes('comida') || lowerResponse.includes('food') || lowerResponse.includes('gastronomía')) {
-      eventType = EventType.OTHER;
-      eventCategory = EventCategory.FOOD_DRINK;
-    }
-
-    const extractedTitle = titleMatch ? titleMatch[1].trim() : 'Evento extraído (no estructurado)';
-    const extractedDescription = descriptionMatch ? descriptionMatch[1].trim() : '';
-    const extractedLocation = locationMatch ? locationMatch[1].trim() : 'Ubicación no especificada';
-    const extractedCity = cityMatch ? cityMatch[1].trim() : 'Barcelona';
-
-    apiLogger.info(`🔍 Extracted data - Title: "${extractedTitle}", Location: "${extractedLocation}", City: "${extractedCity}"`);
-
-    return {
-      title: extractedTitle,
-      description: extractedDescription,
-      dateTime: {
-        startDate: extractedDate.toISOString(),
-        startTime: extractedTime,
-        timezone: 'Europe/Madrid',
-        allDay: false
-      },
-      location: {
-        name: extractedLocation,
-        city: extractedCity,
-        country: 'España'
-      },
-      type: eventType,
-      category: eventCategory,
-      tags: hashtagMatches || [],
-      media: {
-        images: [{ 
-          url: `https://picsum.photos/800/600?random=${Math.floor(Math.random() * 1000)}`,
-          alt: 'Event image'
-        }],
-        videos: []
-      },
-      social: {
-        hashtags: hashtagMatches || [],
-        mentions: []
-      },
-      metadata: {
-        extractedAt: new Date().toISOString(),
-        processingTime: 0,
-        instagramPostId: this.extractContentId(url),
-        contentType,
-        confidence: 0.6,
-        confidenceLevel: ExtractionConfidence.MEDIUM,
-        extractorVersion: '3.0.0-openai-vision-heuristic',
-        errors: [],
-        warnings: [...warnings, 'Información extraída usando heurística de OpenAI Vision']
-      },
-      rawContent: response,
-      originalUrl: url
-    };
-  }
-
-  /**
    * Parsea texto extraído por OCR para encontrar información de eventos
    */
-  private parseEventDataFromText(text: string, url: string): SharedExtractedData {
+  private parseEventDataFromText(text: string, url: string, realImageUrl?: string): SharedExtractedData {
     const now = new Date();
     const futureDate = new Date(now.getTime() + Math.random() * 90 * 24 * 60 * 60 * 1000);
     
@@ -916,12 +837,12 @@ export class OpenAIVisionService {
     let title = 'Evento detectado por OCR';
     let description = text.substring(0, 200) + (text.length > 200 ? '...' : '');
     let extractedDate = futureDate;
-    let extractedTime = '18:00';
+    let extractedTime: string | undefined = undefined; // Cambiar de '18:00' a undefined para indicar que no se encontró hora
     let extractedLocation = 'Ubicación no especificada';
     let extractedCity = 'Barcelona';
     
     // Extraer fechas del texto
-    const dateRegex = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/g;
+    const dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/i;
     const dateMatches = text.match(dateRegex);
     if (dateMatches && dateMatches.length > 0) {
       try {
@@ -933,7 +854,7 @@ export class OpenAIVisionService {
           const year = parseInt(parts[2]) < 100 ? 2000 + parseInt(parts[2]) : parseInt(parts[2]);
           extractedDate = new Date(year, month, day);
         }
-      } catch (error) {
+      } catch (e) {
         // Si falla el parsing de fecha, usar la fecha por defecto
       }
     }
@@ -986,7 +907,7 @@ export class OpenAIVisionService {
       tags: foundHashtags.slice(0, 10),
       media: {
         images: [{ 
-          url: `https://picsum.photos/800/600?random=${Math.floor(Math.random() * 1000)}`,
+          url: realImageUrl || `https://picsum.photos/800/600?random=${Math.floor(Math.random() * 1000)}`,
           alt: 'Event image'
         }],
         videos: []
@@ -1014,7 +935,7 @@ export class OpenAIVisionService {
   /**
    * Genera datos básicos de evento como último recurso
    */
-  private generateBasicEventData(url: string, contentType: InstagramContentType, postText?: string): SharedExtractedData {
+  private generateBasicEventData(url: string, contentType: InstagramContentType, postText?: string, realImageUrl?: string): SharedExtractedData {
     const now = new Date();
     const futureDate = new Date(now.getTime() + Math.random() * 90 * 24 * 60 * 60 * 1000);
     
@@ -1023,26 +944,46 @@ export class OpenAIVisionService {
     let description = 'Información limitada disponible para este evento';
     let hashtags = ['#evento'];
     let extractedDate = futureDate;
-    let extractedTime = '18:00';
+    let extractedTime: string | undefined = undefined; // Cambiar de '18:00' a undefined para indicar que no se encontró hora
     let extractedLocation = 'Ubicación no especificada';
     let extractedCity = 'Barcelona';
     
     if (postText) {
+      // Limpiar el texto de Instagram (remover formato "X likes, Y comments - username on date")
+      let cleanText = postText;
+      
+      // Remover el formato típico de Instagram: "X likes, Y comments - username on date:"
+      const instagramFormatRegex = /^\d+\s+likes?,\s+\d+\s+comments?\s+-\s+[^:]+:\s*/i;
+      cleanText = cleanText.replace(instagramFormatRegex, '');
+      
+      // Remover menciones de usuario al inicio
+      const userMentionRegex = /^@\w+\s+on\s+[^:]+:\s*/i;
+      cleanText = cleanText.replace(userMentionRegex, '');
+      
       // Extraer hashtags del texto
-      const hashtagMatches = postText.match(/#\w+/g);
+      const hashtagMatches = cleanText.match(/#\w+/g);
       if (hashtagMatches && hashtagMatches.length > 0) {
         hashtags = hashtagMatches.slice(0, 5); // Máximo 5 hashtags
       }
       
-      // Intentar extraer fecha del texto
+      // Intentar extraer fecha del texto con patrones más específicos
       const datePatterns = [
         /(\d{1,2})\s+(?:de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/gi,
         /(\d{1,2})\/(\d{1,2})\/(\d{4})/g,
-        /(\d{1,2})-(\d{1,2})-(\d{4})/g
+        /(\d{1,2})-(\d{1,2})-(\d{4})/g,
+        /(\d{1,2})\s+(?:de\s+)?(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)/gi,
+        /(\d{1,2})\s+(?:de\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/gi,
+        /(?:este\s+)?(viernes|sábado|domingo|lunes|martes|miércoles|jueves)/gi,
+        /(?:próximo\s+)?(viernes|sábado|domingo|lunes|martes|miércoles|jueves)/gi,
+        /el\s+(\d{1,2})\s+(?:de\s+)?(febrer|març|abril|maig|juny|juliol|agost|setembre|octubre|novembre|desembre)/gi,
+        /DIVENDRES\s+(\d{1,2})\/(\d{1,2})/gi,
+        /DISSABTE\s+(\d{1,2})\/(\d{1,2})/gi,
+        /DIUMENGE\s+(\d{1,2})\/(\d{1,2})/gi,
+        /(\d{1,2})\/(\d{1,2})/g
       ];
       
       for (const pattern of datePatterns) {
-        const match = postText.match(pattern);
+        const match = cleanText.match(pattern);
         if (match) {
           try {
             // Intentar parsear la fecha encontrada
@@ -1058,48 +999,227 @@ export class OpenAIVisionService {
         }
       }
       
-      // Intentar extraer hora del texto
-      const timePattern = /(\d{1,2}):(\d{2})/g;
-      const timeMatch = postText.match(timePattern);
-      if (timeMatch) {
-        extractedTime = timeMatch[0];
+      // Intentar extraer hora del texto con patrones más específicos
+      const timePatterns = [
+        /(\d{1,2}):(\d{2})/g,
+        /(\d{1,2})h/g,
+        /(\d{1,2})\s*pm/gi,
+        /(\d{1,2})\s*am/gi,
+        /a\s+las\s+(\d{1,2}):(\d{2})/gi,
+        /a\s+las\s+(\d{1,2})h/gi,
+        /de\s+(\d{1,2}):(\d{2})\s+a\s+(\d{1,2}):(\d{2})/gi,
+        /de\s+(\d{1,2})h\s+a\s+(\d{1,2})h/gi,
+        /(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/g
+      ];
+      
+      for (const pattern of timePatterns) {
+        const timeMatch = cleanText.match(pattern);
+        if (timeMatch) {
+          extractedTime = timeMatch[0];
+          break;
+        }
       }
       
-      // Intentar extraer ubicación del texto
+      // Intentar extraer ubicación del texto con patrones más específicos para eventos musicales
       const locationPatterns = [
         /en\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/g,
         /en\s+el\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/g,
         /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Club/g,
         /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Museo/g,
-        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Parque/g
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Parque/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Teatro/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Auditorio/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Centro/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Espacio/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Salón/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Bar/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Pub/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Discoteca/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Sala/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Venue/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Hi-Fi/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Oblicuo/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Salvadiscos/g,
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+Golfo\s+de\s+Guinea/g,
+        /@([a-z]+)/gi, // Capturar menciones como @salvadiscos
+        /(?:en|al|del)\s+([A-Z][a-z]+)/g, // Patrones más simples para lugares
+        /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:estará|estarán|presenta|presentan)/gi
       ];
       
-      for (const pattern of locationPatterns) {
-        const match = postText.match(pattern);
-        if (match && match[1]) {
-          extractedLocation = match[1];
+      // Primero buscar ubicaciones específicas de eventos musicales (alta prioridad)
+      const highPriorityLocations = [
+        'salvadiscos', 'oblicuo', 'hi-fi', 'golfo de guinea', 'dublab', 'sala apolo', 'razzmatazz'
+      ];
+      
+      let foundHighPriorityLocation = false;
+      for (const location of highPriorityLocations) {
+        const regex = new RegExp(location, 'gi');
+        const match = cleanText.match(regex);
+        if (match) {
+          extractedLocation = location.charAt(0).toUpperCase() + location.substring(1);
+          foundHighPriorityLocation = true;
           break;
         }
       }
       
-      // Intentar extraer ciudad del texto
-      const cityPattern = /(Barcelona|Madrid|Valencia|Sevilla|Bilbao|Málaga|Zaragoza|Murcia|Palma|Las Palmas)/gi;
-      const cityMatch = postText.match(cityPattern);
+      // Si no encontramos ubicación de alta prioridad, buscar con patrones
+      if (!foundHighPriorityLocation) {
+        for (const pattern of locationPatterns) {
+          const match = cleanText.match(pattern);
+          if (match && match[1]) {
+            // Si encontramos una mención como @salvadiscos, convertirla a "Salvadiscos"
+            if (match[1].startsWith('@')) {
+              extractedLocation = match[1].substring(1).charAt(0).toUpperCase() + match[1].substring(2);
+            } else {
+              extractedLocation = match[1];
+            }
+            break;
+          }
+        }
+      }
+      
+      // Si no encontramos ubicación específica, buscar en el texto completo con prioridad
+      if (extractedLocation === 'Ubicación no especificada') {
+        // Priorizar ubicaciones específicas de eventos musicales
+        const priorityLocationPatterns = [
+          /salvadiscos/gi,
+          /oblicuo/gi,
+          /hi-fi/gi,
+          /golfo\s+de\s+guinea/gi,
+          /dublab/gi,
+          /sala\s+apolo/gi,
+          /razzmatazz/gi
+        ];
+        
+        for (const pattern of priorityLocationPatterns) {
+          const match = cleanText.match(pattern);
+          if (match) {
+            extractedLocation = match[0].charAt(0).toUpperCase() + match[0].substring(1);
+            break;
+          }
+        }
+        
+        // Si aún no encontramos, buscar ubicaciones genéricas pero con menor prioridad
+        if (extractedLocation === 'Ubicación no especificada') {
+          const genericLocationPatterns = [
+            /club/gi,
+            /bar/gi,
+            /pub/gi,
+            /discoteca/gi,
+            /sala/gi,
+            /venue/gi,
+            /asociación/gi  // Mover asociación al final de la lista de prioridad
+          ];
+          
+          for (const pattern of genericLocationPatterns) {
+            const match = cleanText.match(pattern);
+            if (match) {
+              extractedLocation = match[0].charAt(0).toUpperCase() + match[0].substring(1);
+              break;
+            }
+          }
+        }
+      }
+      
+      // Verificación final: si encontramos tanto salvadiscos como asociación, priorizar salvadiscos
+      if (extractedLocation.toLowerCase() === 'asociación' && cleanText.toLowerCase().includes('salvadiscos')) {
+        extractedLocation = 'Salvadiscos';
+      }
+      
+      // Intentar extraer ciudad del texto con más ciudades
+      const cityPattern = /(Barcelona|Madrid|Valencia|Sevilla|Bilbao|Málaga|Zaragoza|Murcia|Palma|Las Palmas|Alicante|Córdoba|Valladolid|Vigo|Gijón|Oviedo|Santander|San Sebastián|Pamplona|Logroño|Huesca|Teruel|Cuenca|Albacete|Jaén|Granada|Almería|Cádiz|Huelva|Badajoz|Cáceres|Salamanca|Ávila|Segovia|Soria|Guadalajara|Toledo|Ciudad Real|León|Burgos|Palencia|Zamora|Lugo|Ourense|Pontevedra|La Coruña|Vitoria)/gi;
+      const cityMatch = cleanText.match(cityPattern);
       if (cityMatch) {
         extractedCity = cityMatch[0];
       }
       
-      // Intentar extraer un título del texto (primeras palabras significativas)
-      const words = postText.split(' ').slice(0, 8).join(' ');
-      if (words.length > 5) {
-        title = words;
+      // Intentar extraer un título más específico del texto limpio
+      const lines = cleanText.split('\n').filter(line => line.trim().length > 0);
+      if (lines.length > 0) {
+        const firstLine = lines[0].trim();
+        
+        // Buscar títulos específicos de eventos musicales
+        const musicEventPatterns = [
+          /(?:concierto|festival|show|actuación|performance|live|dj)\s+(?:de\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi,
+          /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:en\s+)?(?:concierto|festival|show|live)/gi,
+          /(?:ft\.|featuring|con)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi,
+          /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+&\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi,
+          /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:DJ|Live|Band|Trio|Quartet)/gi
+        ];
+        
+        let foundTitle = false;
+        for (const pattern of musicEventPatterns) {
+          const match = cleanText.match(pattern);
+          if (match && match[1]) {
+            title = match[1];
+            foundTitle = true;
+            break;
+          }
+        }
+        
+        // Si no encontramos un título específico, usar la primera línea significativa
+        if (!foundTitle && firstLine.length > 5 && firstLine.length < 100) {
+          // Remover comillas del título
+          title = firstLine.replace(/^["']|["']$/g, '');
+        } else if (!foundTitle) {
+          // Si la primera línea es muy larga, tomar las primeras palabras significativas
+          const words = cleanText.split(' ').slice(0, 6).join(' ');
+          if (words.length > 5 && words.length < 80) {
+            title = words.replace(/^["']|["']$/g, '');
+          }
+        }
       }
       
-      // Usar el texto como descripción si no es muy largo
-      if (postText.length < 200) {
-        description = postText;
+      // Usar el texto limpio como descripción si no es muy largo
+      if (cleanText.length < 300) {
+        description = cleanText;
       } else {
-        description = postText.substring(0, 200) + '...';
+        description = cleanText.substring(0, 300) + '...';
+      }
+      
+      // Intentar extraer información específica de eventos musicales
+      const musicKeywords = ['concierto', 'festival', 'dj', 'live', 'música', 'banda', 'artista', 'actuación', 'show', 'performance', 'col·laboració'];
+      const hasMusicKeywords = musicKeywords.some(keyword => cleanText.toLowerCase().includes(keyword));
+      
+      if (hasMusicKeywords) {
+        // Buscar nombres de artistas o bandas
+        const artistPatterns = [
+          /(?:con|ft\.|featuring|&)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/gi,
+          /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:DJ|Live|Band|Trio|Quartet)/gi,
+          /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+estaran\s+presentant/gi,
+          /([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+estarán\s+presentando/gi
+        ];
+        
+        for (const pattern of artistPatterns) {
+          const match = cleanText.match(pattern);
+          if (match && match[1]) {
+            if (title === 'Evento de Instagram' || title.includes('salvadiscos') || title.includes('likes')) {
+              title = match[1];
+            }
+            break;
+          }
+        }
+      }
+    }
+    
+    // Formatear fecha
+    const formattedDate = extractedDate.toISOString().split('T')[0];
+    
+    // Determinar tipo de evento basado en el contenido
+    let eventType = EventType.OTHER;
+    let category = EventCategory.OTHER;
+    
+    if (postText) {
+      const lowerText = postText.toLowerCase();
+      if (lowerText.includes('concierto') || lowerText.includes('música') || lowerText.includes('dj') || lowerText.includes('live')) {
+        eventType = EventType.CONCERT;
+        category = EventCategory.MUSIC;
+      } else if (lowerText.includes('festival')) {
+        eventType = EventType.FESTIVAL;
+        category = EventCategory.MUSIC;
+      } else if (lowerText.includes('exposición') || lowerText.includes('arte')) {
+        eventType = EventType.EXHIBITION;
+        category = EventCategory.ART_CULTURE;
       }
     }
     
@@ -1107,7 +1227,7 @@ export class OpenAIVisionService {
       title,
       description,
       dateTime: {
-        startDate: extractedDate.toISOString(),
+        startDate: formattedDate,
         startTime: extractedTime,
         timezone: 'Europe/Madrid',
         allDay: false
@@ -1117,14 +1237,11 @@ export class OpenAIVisionService {
         city: extractedCity,
         country: 'España'
       },
-      type: EventType.OTHER,
-      category: EventCategory.OTHER,
+      type: eventType,
+      category,
       tags: hashtags,
       media: {
-        images: [{ 
-          url: `https://picsum.photos/800/600?random=${Math.floor(Math.random() * 1000)}`,
-          alt: 'Event image'
-        }],
+        images: realImageUrl ? [{ url: realImageUrl, alt: 'Event image' }] : [],
         videos: []
       },
       social: {
@@ -1136,10 +1253,10 @@ export class OpenAIVisionService {
         processingTime: 0,
         instagramPostId: this.extractContentId(url),
         contentType,
-        confidence: postText ? 0.5 : 0.3, // Mayor confianza si tenemos texto del post
+        confidence: postText ? 0.6 : 0.4,
         confidenceLevel: postText ? ExtractionConfidence.MEDIUM : ExtractionConfidence.LOW,
         extractorVersion: '3.0.0-enhanced-fallback',
-        errors: ['Limited extraction capabilities'],
+        errors: ['Limited extraction capabilities - OpenAI Vision AI not available'],
         warnings: ['Using enhanced fallback extraction', postText ? 'Post text analyzed with pattern matching' : 'No post text available']
       },
       rawContent: postText || 'Información básica extraída',

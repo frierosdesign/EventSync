@@ -37,6 +37,7 @@ const createTables = async (): Promise<void> => {
         time TEXT,
         location TEXT,
         instagram_url TEXT NOT NULL UNIQUE,
+        image_url TEXT,
         raw_content TEXT,
         extracted_data TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

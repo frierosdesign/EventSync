@@ -14,6 +14,7 @@ export interface Event {
   date: string;
   time?: string;
   location?: string;
+  imageUrl?: string;
   instagramUrl: string;
   rawContent: string;
   extractedData: string;
@@ -74,6 +75,7 @@ export class EventService {
           date,
           time,
           location,
+          image_url as imageUrl,
           instagram_url as instagramUrl,
           created_at as createdAt,
           updated_at as updatedAt,
@@ -88,19 +90,20 @@ export class EventService {
       // Map database rows to Event objects
       const events: Event[] = rows.map((row: any, index: number) => {
         try {
-          const event: Event = {
-            id: row.id,
-            title: row.title,
-            description: row.description || '',
-            date: row.date,
-            time: row.time,
-            location: row.location,
-            instagramUrl: row.instagramUrl,
-            rawContent: row.rawContent || '',
-            extractedData: row.extractedData || '',
-            createdAt: row.createdAt,
-            updatedAt: row.updatedAt
-          };
+                  const event: Event = {
+          id: row.id,
+          title: row.title,
+          description: row.description || '',
+          date: row.date,
+          time: row.time,
+          location: row.location,
+          imageUrl: row.imageUrl,
+          instagramUrl: row.instagramUrl,
+          rawContent: row.rawContent || '',
+          extractedData: row.extractedData || '',
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt
+        };
           return event;
         } catch (mapError) {
           apiLogger.error(`❌ Error mapping row ${index}`, { row, mapError });
@@ -132,7 +135,22 @@ export class EventService {
    */
   public getEventById(id: number): Event | null {
     try {
-      const stmt = this.db.prepare('SELECT * FROM events WHERE id = ?');
+      const stmt = this.db.prepare(`
+        SELECT 
+          id,
+          title,
+          description,
+          date,
+          time,
+          location,
+          image_url as imageUrl,
+          instagram_url as instagramUrl,
+          raw_content as rawContent,
+          extracted_data as extractedData,
+          created_at as createdAt,
+          updated_at as updatedAt
+        FROM events WHERE id = ?
+      `);
       const event = stmt.get(id) as Event | undefined;
       
       if (event) {
@@ -156,16 +174,17 @@ export class EventService {
       const stmt = this.db.prepare(`
         INSERT INTO events (
           title, description, date, time, location, 
-          instagram_url, raw_content, extracted_data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          image_url, instagram_url, raw_content, extracted_data
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const result = stmt.run(
         eventData.title,
         eventData.description || null,
         eventData.date,
-                 eventData.time || undefined,
-         eventData.location || undefined,
+        eventData.time || undefined,
+        eventData.location || undefined,
+        eventData.imageUrl || null,
         eventData.instagramUrl,
         eventData.rawContent,
         eventData.extractedData
@@ -236,11 +255,26 @@ export class EventService {
           title: existingEvent.title 
         });
         
+        // En lugar de devolver error, devolver el evento existente como éxito
+        let parsedExtractedData = null;
+        try {
+          if (existingEvent.extractedData) {
+            parsedExtractedData = JSON.parse(existingEvent.extractedData);
+          }
+        } catch (parseError) {
+          apiLogger.warn(`⚠️ Failed to parse extractedData for existing event`, { 
+            eventId: existingEvent.id,
+            error: parseError instanceof Error ? parseError.message : 'Unknown parse error'
+          });
+        }
+
         return {
-          success: false,
-          error: 'An event with this Instagram URL already exists',
+          success: true,
           event: existingEvent,
-          processingTime: Date.now() - startTime
+          extractedData: parsedExtractedData,
+          confidence: 1.0, // Máxima confianza para evento existente
+          processingTime: Date.now() - startTime,
+          warnings: ['Event already existed in database']
         };
       }
 
@@ -342,12 +376,33 @@ export class EventService {
    * Convertir datos extraídos por IA a formato de evento
    */
   private convertExtractedDataToEvent(extractedData: any, instagramUrl: string): Omit<Event, 'id' | 'createdAt' | 'updatedAt'> {
-    // Extraer fecha en formato simple
-    const eventDate = extractedData.dateTime?.startDate 
-      ? new Date(extractedData.dateTime.startDate).toISOString().split('T')[0]
-      : new Date().toISOString().split('T')[0];
+    // Extraer fecha en formato simple - manejar diferentes estructuras
+    let eventDate = new Date().toISOString().split('T')[0];
+    if (extractedData.dateTime?.startDate) {
+      eventDate = new Date(extractedData.dateTime.startDate).toISOString().split('T')[0];
+    } else if (extractedData.startDate) {
+      eventDate = new Date(extractedData.startDate).toISOString().split('T')[0];
+    } else if (extractedData.date) {
+      eventDate = new Date(extractedData.date).toISOString().split('T')[0];
+    }
 
-    // Construir ubicación como string
+    // Extraer hora - manejar diferentes estructuras
+    let eventTime = undefined;
+    if (extractedData.dateTime?.startTime) {
+      eventTime = extractedData.dateTime.startTime;
+    } else if (extractedData.startTime) {
+      eventTime = extractedData.startTime;
+    } else if (extractedData.time) {
+      eventTime = extractedData.time;
+    }
+
+    // Debug: Log el valor de eventTime
+    console.log('🔍 DEBUG: eventTime value:', eventTime);
+    console.log('🔍 DEBUG: eventTime type:', typeof eventTime);
+    console.log('🔍 DEBUG: eventTime === undefined:', eventTime === undefined);
+    console.log('🔍 DEBUG: eventTime === null:', eventTime === null);
+
+    // Construir ubicación como string - manejar diferentes estructuras
     let location = '';
     if (extractedData.location?.name) {
       location = extractedData.location.name;
@@ -357,20 +412,31 @@ export class EventService {
       if (extractedData.location.country) {
         location += `, ${extractedData.location.country}`;
       }
+    } else if (extractedData.location && typeof extractedData.location === 'string') {
+      location = extractedData.location;
+    }
+
+    // Extraer URL de imagen
+    let imageUrl = undefined;
+    if (extractedData.imageUrl) {
+      imageUrl = extractedData.imageUrl;
+    } else if (extractedData.media?.images?.[0]?.url) {
+      imageUrl = extractedData.media.images[0].url;
     }
 
     return {
       title: extractedData.title || 'Evento extraído de Instagram',
       description: extractedData.description || extractedData.title,
       date: eventDate,
-             time: extractedData.dateTime?.startTime || undefined,
-       location: location || undefined,
+      time: eventTime,
+      location: location || undefined,
+      imageUrl,
       instagramUrl,
       rawContent: extractedData.rawContent || '',
       extractedData: JSON.stringify({
         ...extractedData,
         extractionMethod: 'ai-simulation',
-        confidence: extractedData.metadata?.confidence || 0.7
+        confidence: extractedData.metadata?.confidence || extractedData.confidence || 0.7
       })
     };
   }
@@ -385,8 +451,9 @@ export class EventService {
       title: 'Evento extraído de Instagram (Mock)',
       description: 'Evento extraído de Instagram usando datos de ejemplo',
       date: eventDate,
-             time: undefined,
-       location: undefined,
+      time: undefined,
+      location: undefined,
+      imageUrl: mockData.imageUrl || `https://picsum.photos/800/600?random=${Math.floor(Math.random() * 1000)}`,
       instagramUrl,
       rawContent: '',
       extractedData: JSON.stringify({

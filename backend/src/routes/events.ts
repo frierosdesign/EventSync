@@ -174,14 +174,13 @@ router.post('/extract', validateInstagramUrl, async (req: Request, res: Response
       userAgent: req.get('User-Agent')
     });
 
-    // Usar directamente el servicio de extracción sin base de datos
-    const { EventExtractionService } = await import('../services/EventExtractionService');
-    const extractionService = EventExtractionService.getInstance();
-    const extractionResult = await extractionService.extractEventFromUrl(url);
+    // Usar el EventService que maneja la base de datos
+    const eventService = getEventService();
+    const extractionResult = await eventService.extractEventFromInstagram(url);
     
     const totalTime = Date.now() - startTime;
 
-    if (!extractionResult.success || !extractionResult.data) {
+    if (!extractionResult.success || !extractionResult.event) {
       apiLogger.error('❌ Event extraction failed', {
         error: extractionResult.error,
         url: url,
@@ -196,23 +195,11 @@ router.post('/extract', validateInstagramUrl, async (req: Request, res: Response
       });
     }
 
-    // Convertir datos extraídos a formato de evento para el frontend
-    const eventData = {
-      id: `extracted_${Date.now()}`,
-      title: extractionResult.data.title,
-      description: extractionResult.data.description,
-      date: extractionResult.data.date || new Date().toISOString(),
-      time: extractionResult.data.time,
-      location: extractionResult.data.location,
-      instagramUrl: url,
-      imageUrl: extractionResult.data.imageUrl,
-      confidence: extractionResult.data.confidence,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
+    // El evento ya está guardado en la base de datos por el EventService
+    const savedEvent = extractionResult.event;
 
     apiLogger.success('🎉 Event extraction completed successfully', {
-      title: eventData.title,
+      title: savedEvent.title,
       confidence: extractionResult.confidence,
       processingTime: totalTime,
       warnings: extractionResult.warnings?.length || 0
@@ -221,8 +208,8 @@ router.post('/extract', validateInstagramUrl, async (req: Request, res: Response
     return res.status(201).json({
       success: true,
       data: {
-        event: eventData,
-        extracted: extractionResult.data
+        event: savedEvent,
+        extracted: extractionResult.extractedData
       },
       confidence: extractionResult.confidence,
       processingTime: totalTime,

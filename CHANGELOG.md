@@ -14,6 +14,8 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - Integración con Google Calendar para exportación de eventos
 - Sistema de logging detallado para debugging
 - Health check endpoint para monitoreo
+- **Icono de enlace externo para abrir eventos de Instagram en nueva pestaña**
+- Enlaces directos al post original de Instagram en EventPreview
 
 ### Changed
 - Mejorado el manejo de errores en el componente EventPreview

@@ -17,6 +17,7 @@ out/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.backup
 
 # Database
 *.db
@@ -124,3 +125,4 @@ coverage/
 *.tar.gz backend/.env.backup
 backend/ig-cookies.json
 backend/instagram-cookies.json
+

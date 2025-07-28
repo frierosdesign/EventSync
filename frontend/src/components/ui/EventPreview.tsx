@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, Clock, MapPin, Instagram, Download, Edit3, Check, X } from 'lucide-react';
+import { Calendar, Clock, MapPin, Instagram, Download, Edit3, Check, X, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { CalendarExport } from './CalendarExport';
@@ -481,6 +481,19 @@ export const EventPreview: React.FC<EventPreviewProps> = ({
                     // Aquí puedes agregar lógica adicional si es necesario
                   }}
                 />
+
+                {/* Instagram Link Icon */}
+                {currentEvent.instagramUrl && (
+                  <a
+                    href={currentEvent.instagramUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-2 text-gray-400 hover:text-gray-600 transition-colors"
+                    title="Abrir en Instagram"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
+                )}
               </div>
             </div>
           )}

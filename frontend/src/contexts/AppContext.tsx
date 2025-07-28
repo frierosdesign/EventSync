@@ -116,7 +116,7 @@ export type AppAction =
   | { type: 'SET_EVENTS_PAGINATION'; payload: Partial<AppState['events']['pagination']> }
   | { type: 'EXTRACTION_START'; payload: string }
   | { type: 'EXTRACTION_PROGRESS'; payload: number }
-  | { type: 'EXTRACTION_SUCCESS'; payload: { event: Event; extractedData: ExtractedData; processingTime: number } }
+  | { type: 'EXTRACTION_SUCCESS'; payload: { event: Event; extractedData: ExtractedData | null; processingTime: number } }
   | { type: 'EXTRACTION_ERROR'; payload: { message: string; type: ApiErrorType; retryCount: number } }
   | { type: 'EXTRACTION_CLEAR' }
   | { type: 'CACHE_SET'; payload: { key: string; data: any; ttl?: number } }
@@ -299,7 +299,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
           result: {
             event: action.payload.event,
             extractedData: action.payload.extractedData,
-            confidence: action.payload.extractedData.metadata.confidence,
+            confidence: action.payload.extractedData?.metadata?.confidence || 0.8,
             processingTime: action.payload.processingTime
           },
           history: [
@@ -550,7 +550,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           actions.addNotification({
             type: 'success',
             title: 'Extracción exitosa',
-            message: `Evento "${response.data.event.title}" extraído correctamente`,
+            message: `Evento "${response.data.event.title}" procesado correctamente`,
             autoHide: true
           });
         } else {
